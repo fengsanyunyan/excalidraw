@@ -1,12 +1,14 @@
 import React from "react";
 import {
-  arrowBarToLeftIcon,
+  loginIcon,
   ExcalLogo,
+  eyeIcon,
 } from "../../packages/excalidraw/components/icons";
-import { Theme } from "../../packages/excalidraw/element/types";
+import type { Theme } from "../../packages/excalidraw/element/types";
 import { MainMenu } from "../../packages/excalidraw/index";
 import { isExcalidrawPlusSignedUser } from "../app_constants";
-import { LanguageList } from "./LanguageList";
+import { LanguageList } from "../app-language/LanguageList";
+import { saveDebugState } from "./DebugCanvas";
 
 export const AppMainMenu: React.FC<{
   onCollabDialogOpen: () => any;
@@ -14,6 +16,7 @@ export const AppMainMenu: React.FC<{
   isCollabEnabled: boolean;
   theme: Theme | "system";
   setTheme: (theme: Theme | "system") => void;
+  refresh: () => void;
 }> = React.memo((props) => {
   return (
     <MainMenu>
@@ -28,13 +31,14 @@ export const AppMainMenu: React.FC<{
         />
       )}
       <MainMenu.DefaultItems.CommandPalette className="highlighted" />
+      <MainMenu.DefaultItems.SearchMenu />
       <MainMenu.DefaultItems.Help />
       <MainMenu.DefaultItems.ClearCanvas />
       <MainMenu.Separator />
       <MainMenu.ItemLink
         icon={ExcalLogo}
         href={`${
-          import.meta.env.VITE_APP_PLUS_APP
+          import.meta.env.VITE_APP_PLUS_LP
         }/plus?utm_source=excalidraw&utm_medium=app&utm_content=hamburger`}
         className=""
       >
@@ -42,7 +46,7 @@ export const AppMainMenu: React.FC<{
       </MainMenu.ItemLink>
       <MainMenu.DefaultItems.Socials />
       <MainMenu.ItemLink
-        icon={arrowBarToLeftIcon}
+        icon={loginIcon}
         href={`${import.meta.env.VITE_APP_PLUS_APP}${
           isExcalidrawPlusSignedUser ? "" : "/sign-up"
         }?utm_source=signin&utm_medium=app&utm_content=hamburger`}
@@ -50,6 +54,23 @@ export const AppMainMenu: React.FC<{
       >
         {isExcalidrawPlusSignedUser ? "Sign in" : "Sign up"}
       </MainMenu.ItemLink>
+      {import.meta.env.DEV && (
+        <MainMenu.Item
+          icon={eyeIcon}
+          onClick={() => {
+            if (window.visualDebug) {
+              delete window.visualDebug;
+              saveDebugState({ enabled: false });
+            } else {
+              window.visualDebug = { data: [] };
+              saveDebugState({ enabled: true });
+            }
+            props?.refresh();
+          }}
+        >
+          Visual Debug
+        </MainMenu.Item>
+      )}
       <MainMenu.Separator />
       <MainMenu.DefaultItems.ToggleTheme
         allowSystemTheme

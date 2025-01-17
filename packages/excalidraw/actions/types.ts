@@ -1,14 +1,16 @@
-import React from "react";
-import { ExcalidrawElement, OrderedExcalidrawElement } from "../element/types";
-import {
+import type React from "react";
+import type {
+  ExcalidrawElement,
+  OrderedExcalidrawElement,
+} from "../element/types";
+import type {
   AppClassProperties,
   AppState,
   ExcalidrawProps,
   BinaryFiles,
   UIAppState,
 } from "../types";
-import { MarkOptional } from "../utility-types";
-import { StoreActionType } from "../store";
+import type { StoreActionType } from "../store";
 
 export type ActionSource =
   | "ui"
@@ -21,10 +23,7 @@ export type ActionSource =
 export type ActionResult =
   | {
       elements?: readonly ExcalidrawElement[] | null;
-      appState?: MarkOptional<
-        AppState,
-        "offsetTop" | "offsetLeft" | "width" | "height"
-      > | null;
+      appState?: Partial<AppState> | null;
       files?: BinaryFiles | null;
       storeAction: StoreActionType;
       replaceFiles?: boolean;
@@ -67,6 +66,7 @@ export type ActionName =
   | "changeSloppiness"
   | "changeStrokeStyle"
   | "changeArrowhead"
+  | "changeArrowType"
   | "changeOpacity"
   | "changeFontSize"
   | "toggleCanvasMenu"
@@ -131,7 +131,14 @@ export type ActionName =
   | "setEmbeddableAsActiveTool"
   | "createContainerFromText"
   | "wrapTextInContainer"
-  | "commandPalette";
+  | "commandPalette"
+  | "autoResize"
+  | "elementStats"
+  | "searchMenu"
+  | "copyElementLink"
+  | "linkToElement"
+  | "cropEditor"
+  | "wrapSelectionInFrame";
 
 export type PanelComponentProps = {
   elements: readonly ExcalidrawElement[];
@@ -185,7 +192,8 @@ export interface Action {
           | "history"
           | "menu"
           | "collab"
-          | "hyperlink";
+          | "hyperlink"
+          | "search_menu";
         action?: string;
         predicate?: (
           appState: Readonly<AppState>,

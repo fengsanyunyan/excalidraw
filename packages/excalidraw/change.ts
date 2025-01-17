@@ -1,18 +1,14 @@
 import { ENV } from "./constants";
+import type { BindableProp, BindingProp } from "./element/binding";
 import {
   BoundElement,
   BindableElement,
-  BindableProp,
-  BindingProp,
   bindingProperties,
   updateBoundElements,
 } from "./element/binding";
 import { LinearElementEditor } from "./element/linearElementEditor";
-import {
-  ElementUpdate,
-  mutateElement,
-  newElementWith,
-} from "./element/mutateElement";
+import type { ElementUpdate } from "./element/mutateElement";
+import { mutateElement, newElementWith } from "./element/mutateElement";
 import {
   getBoundTextElementId,
   redrawTextBoundingBox,
@@ -21,26 +17,29 @@ import {
   hasBoundTextElement,
   isBindableElement,
   isBoundToContainer,
+  isImageElement,
   isTextElement,
 } from "./element/typeChecks";
-import {
+import type {
   ExcalidrawElement,
+  ExcalidrawImageElement,
   ExcalidrawLinearElement,
   ExcalidrawTextElement,
   NonDeleted,
+  Ordered,
   OrderedExcalidrawElement,
   SceneElementsMap,
 } from "./element/types";
 import { orderByFractionalIndex, syncMovedIndices } from "./fractionalIndex";
 import { getNonDeletedGroupIds } from "./groups";
 import { getObservedAppState } from "./store";
-import {
+import type {
   AppState,
   ObservedAppState,
   ObservedElementsAppState,
   ObservedStandaloneAppState,
 } from "./types";
-import { SubtypeOf, ValueOf } from "./utility-types";
+import type { SubtypeOf, ValueOf } from "./utility-types";
 import {
   arrayToMap,
   arrayToObject,
@@ -630,6 +629,18 @@ export class AppStateChange implements Change<AppState> {
             );
 
             break;
+          case "croppingElementId": {
+            const croppingElementId = nextAppState[key];
+            const element =
+              croppingElementId && nextElements.get(croppingElementId);
+
+            if (element && !element.isDeleted) {
+              visibleDifferenceFlag.value = true;
+            } else {
+              nextAppState[key] = null;
+            }
+            break;
+          }
           case "editingGroupId":
             const editingGroupId = nextAppState[key];
 
@@ -760,6 +771,7 @@ export class AppStateChange implements Change<AppState> {
       selectedElementIds,
       editingLinearElementId,
       selectedLinearElementId,
+      croppingElementId,
       ...standaloneProps
     } = delta as ObservedAppState;
 
@@ -783,7 +795,10 @@ export class AppStateChange implements Change<AppState> {
   }
 }
 
-type ElementPartial = Omit<ElementUpdate<OrderedExcalidrawElement>, "seed">;
+type ElementPartial<T extends ExcalidrawElement = ExcalidrawElement> = Omit<
+  ElementUpdate<Ordered<T>>,
+  "seed"
+>;
 
 /**
  * Elements change is a low level primitive to capture a change between two sets of elements.
@@ -1104,7 +1119,6 @@ export class ElementsChange implements Change<SceneElementsMap> {
     try {
       // TODO: #7348 refactor away mutations below, so that we couldn't end up in an incosistent state
       ElementsChange.redrawTextBoundingBoxes(nextElements, changedElements);
-      ElementsChange.redrawBoundArrows(nextElements, changedElements);
 
       // the following reorder performs also mutations, but only on new instances of changed elements
       // (unless something goes really bad and it fallbacks to fixing all invalid indices)
@@ -1113,6 +1127,9 @@ export class ElementsChange implements Change<SceneElementsMap> {
         changedElements,
         flags,
       );
+
+      // Need ordered nextElements to avoid z-index binding issues
+      ElementsChange.redrawBoundArrows(nextElements, changedElements);
     } catch (e) {
       console.error(
         `Couldn't mutate elements after applying elements change`,
@@ -1216,6 +1233,18 @@ export class ElementsChange implements Change<SceneElementsMap> {
       Object.assign(directlyApplicablePartial, {
         boundElements: mergedBoundElements,
       });
+    }
+
+    if (isImageElement(element)) {
+      const _delta = delta as Delta<ElementPartial<ExcalidrawImageElement>>;
+      // we want to override `crop` only if modified so that we don't reset
+      // when undoing/redoing unrelated change
+      if (_delta.deleted.crop || _delta.inserted.crop) {
+        Object.assign(directlyApplicablePartial, {
+          // apply change verbatim
+          crop: _delta.inserted.crop ?? null,
+        });
+      }
     }
 
     if (!flags.containsVisibleDifference) {
@@ -1464,7 +1493,9 @@ export class ElementsChange implements Change<SceneElementsMap> {
   ) {
     for (const element of changed.values()) {
       if (!element.isDeleted && isBindableElement(element)) {
-        updateBoundElements(element, elements);
+        updateBoundElements(element, elements, {
+          changedElements: changed,
+        });
       }
     }
   }
@@ -1481,19 +1512,28 @@ export class ElementsChange implements Change<SceneElementsMap> {
       return elements;
     }
 
-    const previous = Array.from(elements.values());
-    const reordered = orderByFractionalIndex([...previous]);
+    const unordered = Array.from(elements.values());
+    const ordered = orderByFractionalIndex([...unordered]);
+    const moved = Delta.getRightDifferences(unordered, ordered, true).reduce(
+      (acc, arrayIndex) => {
+        const candidate = unordered[Number(arrayIndex)];
+        if (candidate && changed.has(candidate.id)) {
+          acc.set(candidate.id, candidate);
+        }
 
-    if (
-      !flags.containsVisibleDifference &&
-      Delta.isRightDifferent(previous, reordered, true)
-    ) {
+        return acc;
+      },
+      new Map(),
+    );
+
+    if (!flags.containsVisibleDifference && moved.size) {
       // we found a difference in order!
       flags.containsVisibleDifference = true;
     }
 
-    // let's synchronize all invalid indices of moved elements
-    return arrayToMap(syncMovedIndices(reordered, changed)) as typeof elements;
+    // synchronize all elements that were actually moved
+    // could fallback to synchronizing all invalid indices
+    return arrayToMap(syncMovedIndices(ordered, moved)) as typeof elements;
   }
 
   /**

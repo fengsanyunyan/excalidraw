@@ -1,20 +1,23 @@
+import Pool from "es6-promise-pool";
+import { average } from "../math";
 import { COLOR_PALETTE } from "./colors";
+import type { EVENT } from "./constants";
 import {
   DEFAULT_VERSION,
-  EVENT,
   FONT_FAMILY,
+  getFontFamilyFallbacks,
   isDarwin,
   WINDOWS_EMOJI_FALLBACK_FONT,
 } from "./constants";
-import { FontFamilyValues, FontString } from "./element/types";
-import {
+import type { FontFamilyValues, FontString } from "./element/types";
+import type {
   ActiveTool,
   AppState,
   ToolType,
   UnsubscribeCallback,
   Zoom,
 } from "./types";
-import { MaybePromise, ResolutionType } from "./utility-types";
+import type { MaybePromise, ResolutionType } from "./utility-types";
 
 let mockDateTime: string | null = null;
 
@@ -88,7 +91,10 @@ export const getFontFamilyString = ({
 }) => {
   for (const [fontFamilyString, id] of Object.entries(FONT_FAMILY)) {
     if (id === fontFamily) {
-      return `${fontFamilyString}, ${WINDOWS_EMOJI_FALLBACK_FONT}`;
+      // TODO: we should fallback first to generic family names first
+      return `${fontFamilyString}${getFontFamilyFallbacks(id)
+        .map((x) => `, ${x}`)
+        .join("")}`;
     }
   }
   return WINDOWS_EMOJI_FALLBACK_FONT;
@@ -676,16 +682,51 @@ export const arrayToMapWithIndex = <T extends { id: string }>(
  */
 export const arrayToObject = <T>(
   array: readonly T[],
-  groupBy?: (value: T) => string,
+  groupBy?: (value: T) => string | number,
 ) =>
   array.reduce((acc, value) => {
     acc[groupBy ? groupBy(value) : String(value)] = value;
     return acc;
   }, {} as { [key: string]: T });
 
+/** Doubly linked node */
+export type Node<T> = T & {
+  prev: Node<T> | null;
+  next: Node<T> | null;
+};
+
+/**
+ * Creates a circular doubly linked list by adding `prev` and `next` props to the existing array nodes.
+ */
+export const arrayToList = <T>(array: readonly T[]): Node<T>[] =>
+  array.reduce((acc, curr, index) => {
+    const node: Node<T> = { ...curr, prev: null, next: null };
+
+    // no-op for first item, we don't want circular references on a single item
+    if (index !== 0) {
+      const prevNode = acc[index - 1];
+      node.prev = prevNode;
+      prevNode.next = node;
+
+      if (index === array.length - 1) {
+        // make the references circular and connect head & tail
+        const firstNode = acc[0];
+        node.next = firstNode;
+        firstNode.prev = node;
+      }
+    }
+
+    acc.push(node);
+
+    return acc;
+  }, [] as Node<T>[]);
+
 export const isTestEnv = () => import.meta.env.MODE === "test";
 
 export const isDevEnv = () => import.meta.env.MODE === "development";
+
+export const isServerEnv = () =>
+  typeof process !== "undefined" && !!process?.env?.NODE_ENV;
 
 export const wrapEvent = <T extends Event>(name: EVENT, nativeEvent: T) => {
   return new CustomEvent(name, {
@@ -896,6 +937,12 @@ export const assertNever = (
   throw new Error(message);
 };
 
+export function invariant(condition: any, message: string): asserts condition {
+  if (!condition) {
+    throw new Error(message);
+  }
+}
+
 /**
  * Memoizes on values of `opts` object (strict equality).
  */
@@ -952,10 +999,6 @@ export const isMemberOf = <T extends string>(
 };
 
 export const cloneJSON = <T>(obj: T): T => JSON.parse(JSON.stringify(obj));
-
-export const isFiniteNumber = (value: any): value is number => {
-  return typeof value === "number" && Number.isFinite(value);
-};
 
 export const updateStable = <T extends any[] | Record<string, any>>(
   prevValue: T,
@@ -1040,7 +1083,6 @@ export function addEventListener(
   };
 }
 
-const average = (a: number, b: number) => (a + b) / 2;
 export function getSvgPathFromStroke(points: number[][], closed = true) {
   const len = points.length;
 
@@ -1123,4 +1165,76 @@ export const promiseTry = async <TValue, TArgs extends unknown[]>(
   return new Promise((resolve) => {
     resolve(fn(...args));
   });
+};
+
+export const isAnyTrue = (...args: boolean[]): boolean =>
+  Math.max(...args.map((arg) => (arg ? 1 : 0))) > 0;
+
+export const safelyParseJSON = (json: string): Record<string, any> | null => {
+  try {
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
+};
+// extending the missing types
+// relying on the [Index, T] to keep a correct order
+type TPromisePool<T, Index = number> = Pool<[Index, T][]> & {
+  addEventListener: (
+    type: "fulfilled",
+    listener: (event: { data: { result: [Index, T] } }) => void,
+  ) => (event: { data: { result: [Index, T] } }) => void;
+  removeEventListener: (
+    type: "fulfilled",
+    listener: (event: { data: { result: [Index, T] } }) => void,
+  ) => void;
+};
+
+export class PromisePool<T> {
+  private readonly pool: TPromisePool<T>;
+  private readonly entries: Record<number, T> = {};
+
+  constructor(
+    source: IterableIterator<Promise<void | readonly [number, T]>>,
+    concurrency: number,
+  ) {
+    this.pool = new Pool(
+      source as unknown as () => void | PromiseLike<[number, T][]>,
+      concurrency,
+    ) as TPromisePool<T>;
+  }
+
+  public all() {
+    const listener = (event: { data: { result: void | [number, T] } }) => {
+      if (event.data.result) {
+        // by default pool does not return the results, so we are gathering them manually
+        // with the correct call order (represented by the index in the tuple)
+        const [index, value] = event.data.result;
+        this.entries[index] = value;
+      }
+    };
+
+    this.pool.addEventListener("fulfilled", listener);
+
+    return this.pool.start().then(() => {
+      setTimeout(() => {
+        this.pool.removeEventListener("fulfilled", listener);
+      });
+
+      return Object.values(this.entries);
+    });
+  }
+}
+
+export const sanitizeHTMLAttribute = (html: string) => {
+  return (
+    html
+      // note, if we're not doing stupid things, escaping " is enough,
+      // but we might end up doing stupid things
+      .replace(/&/g, "&amp;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;")
+      .replace(/>/g, "&gt;")
+      .replace(/</g, "&lt;")
+  );
 };

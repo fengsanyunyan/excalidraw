@@ -1,22 +1,16 @@
 import "pepjs";
 
-import {
-  render,
-  queries,
-  RenderResult,
-  RenderOptions,
-  waitFor,
-  fireEvent,
-} from "@testing-library/react";
+import type { RenderResult, RenderOptions } from "@testing-library/react";
+import { act } from "@testing-library/react";
+import { render, queries, waitFor, fireEvent } from "@testing-library/react";
 
 import * as toolQueries from "./queries/toolQueries";
-import { ImportedDataState } from "../data/types";
+import type { ImportedDataState } from "../data/types";
 import { STORAGE_KEYS } from "../../../excalidraw-app/app_constants";
-
-import { SceneData } from "../types";
 import { getSelectedElements } from "../scene/selection";
-import { ExcalidrawElement } from "../element/types";
+import type { ExcalidrawElement } from "../element/types";
 import { UI } from "./helpers/ui";
+import { diffStringsUnified } from "jest-diff";
 
 const customQueries = {
   ...queries,
@@ -73,6 +67,12 @@ const renderApp: TestRenderFn = async (ui, options) => {
     if (!interactiveCanvas) {
       throw new Error("not initialized yet");
     }
+
+    // hack-awaiting app.initialScene() which solves some test race conditions
+    // (later we may switch this with proper event listener)
+    if (window.h.state.isLoading) {
+      throw new Error("still loading");
+    }
   });
 
   return renderResult;
@@ -124,10 +124,6 @@ const initLocalStorage = (data: ImportedDataState) => {
   }
 };
 
-export const updateSceneData = (data: SceneData) => {
-  (window.collab as any).excalidrawAPI.updateScene(data);
-};
-
 const originalGetBoundingClientRect =
   global.window.HTMLDivElement.prototype.getBoundingClientRect;
 
@@ -172,20 +168,24 @@ export const withExcalidrawDimensions = async (
   cb: () => void,
 ) => {
   mockBoundingClientRect(dimensions);
-  // @ts-ignore
-  h.app.refreshViewportBreakpoints();
-  // @ts-ignore
-  h.app.refreshEditorBreakpoints();
-  window.h.app.refresh();
+  act(() => {
+    // @ts-ignore
+    h.app.refreshViewportBreakpoints();
+    // @ts-ignore
+    h.app.refreshEditorBreakpoints();
+    window.h.app.refresh();
+  });
 
   await cb();
 
   restoreOriginalGetBoundingClientRect();
-  // @ts-ignore
-  h.app.refreshViewportBreakpoints();
-  // @ts-ignore
-  h.app.refreshEditorBreakpoints();
-  window.h.app.refresh();
+  act(() => {
+    // @ts-ignore
+    h.app.refreshViewportBreakpoints();
+    // @ts-ignore
+    h.app.refreshEditorBreakpoints();
+    window.h.app.refresh();
+  });
 };
 
 export const restoreOriginalGetBoundingClientRect = () => {
@@ -246,5 +246,52 @@ expect.extend({
       message: () => `expected ${received} to be a non-NaN number`,
       pass: false,
     };
+  },
+
+  toCloselyEqualPoints(received, expected, precision) {
+    if (!Array.isArray(received) || !Array.isArray(expected)) {
+      throw new Error("expected and received are not point arrays");
+    }
+
+    const COMPARE = 1 / Math.pow(10, precision || 2);
+    const pass = received.every(
+      (point, idx) =>
+        Math.abs(expected[idx]?.[0] - point[0]) < COMPARE &&
+        Math.abs(expected[idx]?.[1] - point[1]) < COMPARE,
+    );
+
+    if (!pass) {
+      return {
+        message: () => ` The provided array of points are not close enough.
+
+${diffStringsUnified(
+  JSON.stringify(expected, undefined, 2),
+  JSON.stringify(received, undefined, 2),
+)}`,
+        pass: false,
+      };
+    }
+
+    return {
+      message: () => `expected ${received} to not be close to ${expected}`,
+      pass: true,
+    };
+  },
+});
+
+/**
+ * Serializer for IEE754 float pointing numbers to avoid random failures due to tiny precision differences
+ */
+expect.addSnapshotSerializer({
+  serialize(val, config, indentation, depth, refs, printer) {
+    return printer(val.toFixed(5), config, indentation, depth, refs);
+  },
+  test(val) {
+    return (
+      typeof val === "number" &&
+      Number.isFinite(val) &&
+      !Number.isNaN(val) &&
+      !Number.isInteger(val)
+    );
   },
 });

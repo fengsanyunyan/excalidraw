@@ -2,17 +2,16 @@ import React, { useEffect } from "react";
 import { InitializeApp } from "./components/InitializeApp";
 import App from "./components/App";
 import { isShallowEqual } from "./utils";
+import polyfill from "./polyfill";
 
 import "./css/app.scss";
 import "./css/styles.scss";
-import "../../public/fonts/fonts.css";
-import polyfill from "./polyfill";
+import "./fonts/fonts.css";
 
-import { AppProps, ExcalidrawProps } from "./types";
+import type { AppProps, ExcalidrawProps } from "./types";
 import { defaultLang } from "./i18n";
 import { DEFAULT_UI_OPTIONS } from "./constants";
-import { Provider } from "jotai";
-import { jotaiScope, jotaiStore } from "./jotai";
+import { EditorJotaiProvider, editorJotaiStore } from "./editor-jotai";
 import Footer from "./components/footer/FooterCenter";
 import MainMenu from "./components/main-menu/MainMenu";
 import WelcomeScreen from "./components/welcome-screen/WelcomeScreen";
@@ -43,6 +42,7 @@ const ExcalidrawBase = (props: ExcalidrawProps) => {
     autoFocus = false,
     generateIdForFile,
     onLinkOpen,
+    generateLinkForSelection,
     onPointerDown,
     onPointerUp,
     onScrollChange,
@@ -50,6 +50,7 @@ const ExcalidrawBase = (props: ExcalidrawProps) => {
     validateEmbeddable,
     renderEmbeddable,
     aiEnabled,
+    showDeprecatedFonts,
   } = props;
 
   const canvasActions = props.UIOptions?.canvasActions;
@@ -106,7 +107,7 @@ const ExcalidrawBase = (props: ExcalidrawProps) => {
   }, []);
 
   return (
-    <Provider unstable_createStore={() => jotaiStore} scope={jotaiScope}>
+    <EditorJotaiProvider store={editorJotaiStore}>
       <InitializeApp langCode={langCode} theme={theme}>
         <App
           onChange={onChange}
@@ -131,17 +132,19 @@ const ExcalidrawBase = (props: ExcalidrawProps) => {
           autoFocus={autoFocus}
           generateIdForFile={generateIdForFile}
           onLinkOpen={onLinkOpen}
+          generateLinkForSelection={generateLinkForSelection}
           onPointerDown={onPointerDown}
           onPointerUp={onPointerUp}
           onScrollChange={onScrollChange}
           validateEmbeddable={validateEmbeddable}
           renderEmbeddable={renderEmbeddable}
           aiEnabled={aiEnabled !== false}
+          showDeprecatedFonts={showDeprecatedFonts}
         >
           {children}
         </App>
       </InitializeApp>
-    </Provider>
+    </EditorJotaiProvider>
   );
 };
 
@@ -211,6 +214,7 @@ export {
   hashString,
   isInvisiblySmallElement,
   getNonDeletedElements,
+  getTextFromElements,
 } from "./element";
 export { defaultLang, useI18n, languages } from "./i18n";
 export {
@@ -269,6 +273,7 @@ export { MainMenu };
 export { useDevice } from "./components/App";
 export { WelcomeScreen };
 export { LiveCollaborationTrigger };
+export { Stats } from "./components/Stats";
 
 export { DefaultSidebar } from "./components/DefaultSidebar";
 export { TTDDialog } from "./components/TTDDialog/TTDDialog";
@@ -284,3 +289,7 @@ export {
   isElementInsideBBox,
   elementPartiallyOverlapsWithOrContainsBBox,
 } from "../utils/withinBounds";
+
+export { DiagramToCodePlugin } from "./components/DiagramToCodePlugin/DiagramToCodePlugin";
+export { getDataURL } from "./data/blob";
+export { isElementLink } from "./element/elementLink";

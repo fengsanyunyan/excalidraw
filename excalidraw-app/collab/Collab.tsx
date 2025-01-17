@@ -1,14 +1,16 @@
 import throttle from "lodash.throttle";
 import { PureComponent } from "react";
-import {
+import type {
+  BinaryFileData,
   ExcalidrawImperativeAPI,
   SocketId,
 } from "../../packages/excalidraw/types";
 import { ErrorDialog } from "../../packages/excalidraw/components/ErrorDialog";
 import { APP_NAME, ENV, EVENT } from "../../packages/excalidraw/constants";
-import { ImportedDataState } from "../../packages/excalidraw/data/types";
-import {
+import type { ImportedDataState } from "../../packages/excalidraw/data/types";
+import type {
   ExcalidrawElement,
+  FileId,
   InitializedExcalidrawImageElement,
   OrderedExcalidrawElement,
 } from "../../packages/excalidraw/element/types";
@@ -19,7 +21,7 @@ import {
   zoomToFitBounds,
   reconcileElements,
 } from "../../packages/excalidraw";
-import { Collaborator, Gesture } from "../../packages/excalidraw/types";
+import type { Collaborator, Gesture } from "../../packages/excalidraw/types";
 import {
   assertNever,
   preventUnload,
@@ -36,12 +38,14 @@ import {
   SYNC_FULL_SCENE_INTERVAL_MS,
   WS_EVENTS,
 } from "../app_constants";
+import type {
+  SocketUpdateDataSource,
+  SyncableExcalidrawElement,
+} from "../data";
 import {
   generateCollaborationLinkData,
   getCollaborationLink,
   getSyncableElements,
-  SocketUpdateDataSource,
-  SyncableExcalidrawElement,
 } from "../data";
 import {
   isSavedToFirebase,
@@ -75,9 +79,8 @@ import { newElementWith } from "../../packages/excalidraw/element/mutateElement"
 import { decryptData } from "../../packages/excalidraw/data/encryption";
 import { resetBrowserStateVersions } from "../data/tabSync";
 import { LocalData } from "../data/LocalData";
-import { atom } from "jotai";
-import { appJotaiStore } from "../app-jotai";
-import { Mutable, ValueOf } from "../../packages/excalidraw/utility-types";
+import { appJotaiStore, atom } from "../app-jotai";
+import type { Mutable, ValueOf } from "../../packages/excalidraw/utility-types";
 import { getVisibleSceneBounds } from "../../packages/excalidraw/element/bounds";
 import { withBatchedUpdates } from "../../packages/excalidraw/reactUtils";
 import { collabErrorIndicatorAtom } from "./CollabError";
@@ -155,7 +158,7 @@ class Collab extends PureComponent<CollabProps, CollabState> {
           throw new AbortError();
         }
 
-        return saveFilesToFirebase({
+        const { savedFiles, erroredFiles } = await saveFilesToFirebase({
           prefix: `${FIREBASE_STORAGE_PREFIXES.collabFiles}/${roomId}`,
           files: await encodeFilesForUpload({
             files: addedFiles,
@@ -163,6 +166,29 @@ class Collab extends PureComponent<CollabProps, CollabState> {
             maxBytes: FILE_UPLOAD_MAX_BYTES,
           }),
         });
+
+        return {
+          savedFiles: savedFiles.reduce(
+            (acc: Map<FileId, BinaryFileData>, id) => {
+              const fileData = addedFiles.get(id);
+              if (fileData) {
+                acc.set(id, fileData);
+              }
+              return acc;
+            },
+            new Map(),
+          ),
+          erroredFiles: erroredFiles.reduce(
+            (acc: Map<FileId, BinaryFileData>, id) => {
+              const fileData = addedFiles.get(id);
+              if (fileData) {
+                acc.set(id, fileData);
+              }
+              return acc;
+            },
+            new Map(),
+          ),
+        };
       },
     });
     this.excalidrawAPI = props.excalidrawAPI;
@@ -392,7 +418,7 @@ class Collab extends PureComponent<CollabProps, CollabState> {
       .filter((element) => {
         return (
           isInitializedImageElement(element) &&
-          !this.fileManager.isFileHandled(element.fileId) &&
+          !this.fileManager.isFileTracked(element.fileId) &&
           !element.isDeleted &&
           (opts.forceFetchFiles
             ? element.status !== "pending" ||

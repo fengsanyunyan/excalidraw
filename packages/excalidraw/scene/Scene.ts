@@ -1,4 +1,5 @@
-import {
+import throttle from "lodash.throttle";
+import type {
   ExcalidrawElement,
   NonDeletedExcalidrawElement,
   NonDeleted,
@@ -10,11 +11,11 @@ import {
   Ordered,
 } from "../element/types";
 import { isNonDeletedElement } from "../element";
-import { LinearElementEditor } from "../element/linearElementEditor";
+import type { LinearElementEditor } from "../element/linearElementEditor";
 import { isFrameLikeElement } from "../element/typeChecks";
 import { getSelectedElements } from "./selection";
-import { AppState } from "../types";
-import { Assert, SameType } from "../utility-types";
+import type { AppState } from "../types";
+import type { Assert, SameType } from "../utility-types";
 import { randomInteger } from "../random";
 import {
   syncInvalidIndices,
@@ -24,6 +25,7 @@ import {
 import { arrayToMap } from "../utils";
 import { toBrandedType } from "../utils";
 import { ENV } from "../constants";
+import { getElementsInGroup } from "../groups";
 
 type ElementIdKey = InstanceType<typeof LinearElementEditor>["elementId"];
 type ElementKey = ExcalidrawElement | ElementIdKey;
@@ -49,6 +51,24 @@ const getNonDeletedElements = <T extends ExcalidrawElement>(
   }
   return { elementsMap, elements };
 };
+
+const validateIndicesThrottled = throttle(
+  (elements: readonly ExcalidrawElement[]) => {
+    if (
+      import.meta.env.DEV ||
+      import.meta.env.MODE === ENV.TEST ||
+      window?.DEBUG_FRACTIONAL_INDICES
+    ) {
+      validateFractionalIndices(elements, {
+        // throw only in dev & test, to remain functional on `DEBUG_FRACTIONAL_INDICES`
+        shouldThrow: import.meta.env.DEV || import.meta.env.MODE === ENV.TEST,
+        includeBoundTextValidation: true,
+      });
+    }
+  },
+  1000 * 60,
+  { leading: true, trailing: false },
+);
 
 const hashSelectionOpts = (
   opts: Parameters<InstanceType<typeof Scene>["getSelectedElements"]>[0],
@@ -105,6 +125,9 @@ class Scene {
     }
   }
 
+  /**
+   * @deprecated pass down `app.scene` and use it directly
+   */
   static getScene(elementKey: ElementKey): Scene | null {
     if (isIdKey(elementKey)) {
       return this.sceneMapById.get(elementKey) || null;
@@ -138,7 +161,17 @@ class Scene {
     elements: null,
     cache: new Map(),
   };
-  private versionNonce: number | undefined;
+  /**
+   * Random integer regenerated each scene update.
+   *
+   * Does not relate to elements versions, it's only a renderer
+   * cache-invalidation nonce at the moment.
+   */
+  private sceneNonce: number | undefined;
+
+  getSceneNonce() {
+    return this.sceneNonce;
+  }
 
   getNonDeletedElementsMap() {
     return this.nonDeletedElementsMap;
@@ -214,10 +247,6 @@ class Scene {
     return (this.elementsMap.get(id) as T | undefined) || null;
   }
 
-  getVersionNonce() {
-    return this.versionNonce;
-  }
-
   getNonDeletedElement(
     id: ExcalidrawElement["id"],
   ): NonDeleted<ExcalidrawElement> | null {
@@ -265,10 +294,7 @@ class Scene {
         : Array.from(nextElements.values());
     const nextFrameLikes: ExcalidrawFrameLikeElement[] = [];
 
-    if (import.meta.env.DEV || import.meta.env.MODE === ENV.TEST) {
-      // throw on invalid indices in test / dev to potentially detect cases were we forgot to sync moved elements
-      validateFractionalIndices(_nextElements.map((x) => x.index));
-    }
+    validateIndicesThrottled(_nextElements);
 
     this.elements = syncInvalidIndices(_nextElements);
     this.elementsMap.clear();
@@ -286,18 +312,18 @@ class Scene {
     this.frames = nextFrameLikes;
     this.nonDeletedFramesLikes = getNonDeletedElements(this.frames).elements;
 
-    this.informMutation();
+    this.triggerUpdate();
   }
 
-  informMutation() {
-    this.versionNonce = randomInteger();
+  triggerUpdate() {
+    this.sceneNonce = randomInteger();
 
     for (const callback of Array.from(this.callbacks)) {
       callback();
     }
   }
 
-  addCallback(cb: SceneStateCallback): SceneStateCallbackRemover {
+  onUpdate(cb: SceneStateCallback): SceneStateCallbackRemover {
     if (this.callbacks.has(cb)) {
       throw new Error();
     }
@@ -352,6 +378,10 @@ class Scene {
   }
 
   insertElementsAtIndex(elements: ExcalidrawElement[], index: number) {
+    if (!elements.length) {
+      return;
+    }
+
     if (!Number.isFinite(index) || index < 0) {
       throw new Error(
         "insertElementAtIndex can only be called with index >= 0",
@@ -378,7 +408,11 @@ class Scene {
   };
 
   insertElements = (elements: ExcalidrawElement[]) => {
-    const index = elements[0].frameId
+    if (!elements.length) {
+      return;
+    }
+
+    const index = elements[0]?.frameId
       ? this.getElementIndex(elements[0].frameId)
       : this.elements.length;
 
@@ -403,6 +437,18 @@ class Scene {
       return this.getElement(element.containerId) || null;
     }
     return null;
+  };
+
+  getElementsFromId = (id: string): ExcalidrawElement[] => {
+    const elementsMap = this.getNonDeletedElementsMap();
+    // first check if the id is an element
+    const el = elementsMap.get(id);
+    if (el) {
+      return [el];
+    }
+
+    // then, check if the id is a group
+    return getElementsInGroup(elementsMap, id);
   };
 }
 

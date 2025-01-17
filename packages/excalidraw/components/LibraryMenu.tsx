@@ -1,11 +1,12 @@
 import React, { useState, useCallback, useMemo, useRef } from "react";
-import Library, {
+import type Library from "../data/library";
+import {
   distributeLibraryItemsOnSquareGrid,
   libraryItemsAtom,
 } from "../data/library";
 import { t } from "../i18n";
 import { randomId } from "../random";
-import {
+import type {
   LibraryItems,
   LibraryItem,
   ExcalidrawProps,
@@ -13,8 +14,7 @@ import {
 } from "../types";
 import LibraryMenuItems from "./LibraryMenuItems";
 import { trackEvent } from "../analytics";
-import { atom, useAtom } from "jotai";
-import { jotaiScope } from "../jotai";
+import { atom, useAtom } from "../editor-jotai";
 import Spinner from "./Spinner";
 import {
   useApp,
@@ -28,7 +28,7 @@ import { useUIAppState } from "../context/ui-appState";
 import "./LibraryMenu.scss";
 import { LibraryMenuControlButtons } from "./LibraryMenuControlButtons";
 import { isShallowEqual } from "../utils";
-import { NonDeletedExcalidrawElement } from "../element/types";
+import type { NonDeletedExcalidrawElement } from "../element/types";
 import { LIBRARY_DISABLED_TYPES } from "../constants";
 
 export const isLibraryMenuOpenAtom = atom(false);
@@ -60,7 +60,7 @@ export const LibraryMenuContent = ({
   selectedItems: LibraryItem["id"][];
   onSelectItems: (id: LibraryItem["id"][]) => void;
 }) => {
-  const [libraryItemsData] = useAtom(libraryItemsAtom, jotaiScope);
+  const [libraryItemsData] = useAtom(libraryItemsAtom);
 
   const _onAddToLibrary = useCallback(
     (elements: LibraryItem["elements"]) => {

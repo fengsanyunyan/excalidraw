@@ -10,12 +10,11 @@ import { Dialog } from "../Dialog";
 import { TextField } from "../TextField";
 import clsx from "clsx";
 import { getSelectedElements } from "../../scene";
-import { Action } from "../../actions/types";
-import { TranslationKeys, t } from "../../i18n";
-import {
-  ShortcutName,
-  getShortcutFromShortcutName,
-} from "../../actions/shortcuts";
+import type { Action } from "../../actions/types";
+import type { TranslationKeys } from "../../i18n";
+import { t } from "../../i18n";
+import type { ShortcutName } from "../../actions/shortcuts";
+import { getShortcutFromShortcutName } from "../../actions/shortcuts";
 import { DEFAULT_SIDEBAR, EVENT } from "../../constants";
 import {
   LockedIcon,
@@ -31,28 +30,35 @@ import {
 } from "../icons";
 import fuzzy from "fuzzy";
 import { useUIAppState } from "../../context/ui-appState";
-import { AppProps, AppState, UIAppState } from "../../types";
+import type { AppProps, AppState, UIAppState } from "../../types";
 import {
   capitalizeString,
   getShortcutKey,
   isWritableElement,
 } from "../../utils";
-import { atom, useAtom } from "jotai";
+import { atom, useAtom, editorJotaiStore } from "../../editor-jotai";
 import { deburr } from "../../deburr";
-import { MarkRequired } from "../../utility-types";
+import type { MarkRequired } from "../../utility-types";
 import { InlineIcon } from "../InlineIcon";
 import { SHAPES } from "../../shapes";
 import { canChangeBackgroundColor, canChangeStrokeColor } from "../Actions";
 import { useStableCallback } from "../../hooks/useStableCallback";
-import { actionClearCanvas, actionLink } from "../../actions";
-import { jotaiStore } from "../../jotai";
+import {
+  actionClearCanvas,
+  actionLink,
+  actionToggleSearchMenu,
+} from "../../actions";
 import { activeConfirmDialogAtom } from "../ActiveConfirmDialog";
-import { CommandPaletteItem } from "./types";
+import type { CommandPaletteItem } from "./types";
 import * as defaultItems from "./defaultCommandPaletteItems";
 import { trackEvent } from "../../analytics";
 import { useStable } from "../../hooks/useStable";
 
 import "./CommandPalette.scss";
+import {
+  actionCopyElementLink,
+  actionLinkToElement,
+} from "../../actions/actionElementLink";
 
 const lastUsedPaletteItem = atom<CommandPaletteItem | null>(null);
 
@@ -256,12 +262,13 @@ function CommandPaletteInner({
         actionManager.actions.cut,
         actionManager.actions.copy,
         actionManager.actions.deleteSelectedElements,
+        actionManager.actions.wrapSelectionInFrame,
         actionManager.actions.copyStyles,
         actionManager.actions.pasteStyles,
+        actionManager.actions.bringToFront,
+        actionManager.actions.bringForward,
         actionManager.actions.sendBackward,
         actionManager.actions.sendToBack,
-        actionManager.actions.bringForward,
-        actionManager.actions.bringToFront,
         actionManager.actions.alignTop,
         actionManager.actions.alignBottom,
         actionManager.actions.alignLeft,
@@ -276,7 +283,10 @@ function CommandPaletteInner({
         actionManager.actions.increaseFontSize,
         actionManager.actions.decreaseFontSize,
         actionManager.actions.toggleLinearEditor,
+        actionManager.actions.cropEditor,
         actionLink,
+        actionCopyElementLink,
+        actionLinkToElement,
       ].map((action: Action) =>
         actionToCommand(
           action,
@@ -338,7 +348,7 @@ function CommandPaletteInner({
           keywords: ["delete", "destroy"],
           viewMode: false,
           perform: () => {
-            jotaiStore.set(activeConfirmDialogAtom, "clearCanvas");
+            editorJotaiStore.set(activeConfirmDialogAtom, "clearCanvas");
           },
         },
         {
@@ -381,6 +391,15 @@ function CommandPaletteInner({
                 },
               });
             }
+          },
+        },
+        {
+          label: t("search.title"),
+          category: DEFAULT_CATEGORIES.app,
+          icon: searchIcon,
+          viewMode: true,
+          perform: () => {
+            actionManager.executeAction(actionToggleSearchMenu);
           },
         },
         {
@@ -541,7 +560,7 @@ function CommandPaletteInner({
           ...command,
           icon: command.icon || boltIcon,
           order: command.order ?? getCategoryOrder(command.category),
-          haystack: `${deburr(command.label)} ${
+          haystack: `${deburr(command.label.toLocaleLowerCase())} ${
             command.keywords?.join(" ") || ""
           }`,
         };
@@ -778,7 +797,9 @@ function CommandPaletteInner({
       return;
     }
 
-    const _query = deburr(commandSearch.replace(/[<>-_| ]/g, ""));
+    const _query = deburr(
+      commandSearch.toLocaleLowerCase().replace(/[<>_| -]/g, ""),
+    );
     matchingCommands = fuzzy
       .filter(_query, matchingCommands, {
         extract: (command) => command.haystack,

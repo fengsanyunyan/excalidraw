@@ -1,13 +1,13 @@
 import { reconcileElements } from "../../packages/excalidraw";
-import {
+import type {
   ExcalidrawElement,
   FileId,
   OrderedExcalidrawElement,
 } from "../../packages/excalidraw/element/types";
 import { getSceneVersion } from "../../packages/excalidraw/element";
-import Portal from "../collab/Portal";
+import type Portal from "../collab/Portal";
 import { restoreElements } from "../../packages/excalidraw/data/restore";
-import {
+import type {
   AppState,
   BinaryFileData,
   BinaryFileMetadata,
@@ -20,8 +20,9 @@ import {
   decryptData,
 } from "../../packages/excalidraw/data/encryption";
 import { MIME_TYPES } from "../../packages/excalidraw/constants";
-import { getSyncableElements, SyncableExcalidrawElement } from ".";
-import { ResolutionType } from "../../packages/excalidraw/utility-types";
+import type { SyncableExcalidrawElement } from ".";
+import { getSyncableElements } from ".";
+import type { ResolutionType } from "../../packages/excalidraw/utility-types";
 import type { Socket } from "socket.io-client";
 import type { RemoteExcalidrawElement } from "../../packages/excalidraw/data/reconcile";
 
@@ -176,8 +177,8 @@ export const saveFilesToFirebase = async ({
 }) => {
   const firebase = await loadFirebaseStorage();
 
-  const erroredFiles = new Map<FileId, true>();
-  const savedFiles = new Map<FileId, true>();
+  const erroredFiles: FileId[] = [];
+  const savedFiles: FileId[] = [];
 
   await Promise.all(
     files.map(async ({ id, buffer }) => {
@@ -193,9 +194,9 @@ export const saveFilesToFirebase = async ({
               cacheControl: `public, max-age=${FILE_CACHE_MAX_AGE_SEC}`,
             },
           );
-        savedFiles.set(id, true);
+        savedFiles.push(id);
       } catch (error: any) {
-        erroredFiles.set(id, true);
+        erroredFiles.push(id);
       }
     }),
   );

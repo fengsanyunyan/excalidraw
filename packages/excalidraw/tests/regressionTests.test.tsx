@@ -1,5 +1,6 @@
+import React from "react";
 import ReactDOM from "react-dom";
-import { ExcalidrawElement } from "../element/types";
+import type { ExcalidrawElement } from "../element/types";
 import { CODES, KEYS } from "../keys";
 import { Excalidraw } from "../index";
 import { reseed } from "../random";
@@ -55,7 +56,7 @@ beforeEach(async () => {
   finger2.reset();
 
   await render(<Excalidraw handleKeyboardGlobally={true} />);
-  h.setState({ height: 768, width: 1024 });
+  API.setAppState({ height: 768, width: 1024 });
 });
 
 afterEach(() => {
@@ -199,7 +200,6 @@ describe("regression tests", () => {
     expect(
       h.elements.filter((element) => element.type === "rectangle").length,
     ).toBe(1);
-
     Keyboard.withModifierKeys({ alt: true }, () => {
       mouse.down(-8, -8);
       mouse.up(10, 10);
@@ -645,9 +645,9 @@ describe("regression tests", () => {
 
   it("updates fontSize & fontFamily appState", () => {
     UI.clickTool("text");
-    expect(h.state.currentItemFontFamily).toEqual(FONT_FAMILY.Virgil);
+    expect(h.state.currentItemFontFamily).toEqual(FONT_FAMILY.Excalifont);
     fireEvent.click(screen.getByTitle(/code/i));
-    expect(h.state.currentItemFontFamily).toEqual(FONT_FAMILY.Cascadia);
+    expect(h.state.currentItemFontFamily).toEqual(FONT_FAMILY["Comic Shanns"]);
   });
 
   it("deselects selected element, on pointer up, when click hits element bounding box but doesn't hit the element", () => {
@@ -725,7 +725,7 @@ describe("regression tests", () => {
     mouse.up(10, 10);
 
     const { x: prevX, y: prevY } = API.getSelectedElement();
-
+    API.clearSelection();
     // drag element from point on bounding box that doesn't hit element
     mouse.reset();
     mouse.down(8, 8);
@@ -758,7 +758,7 @@ describe("regression tests", () => {
         width: 500,
         height: 500,
       });
-      h.elements = [rect1, rect2];
+      API.setElements([rect1, rect2]);
 
       mouse.select(rect1);
 
@@ -794,7 +794,7 @@ describe("regression tests", () => {
         width: 500,
         height: 500,
       });
-      h.elements = [rect1, rect2];
+      API.setElements([rect1, rect2]);
 
       mouse.select(rect1);
 
@@ -1015,12 +1015,22 @@ describe("regression tests", () => {
   });
 
   it("single-clicking on a subgroup of a selected group should not alter selection", () => {
-    const rect1 = UI.createElement("rectangle", { x: 10 });
-    const rect2 = UI.createElement("rectangle", { x: 50 });
+    const rect1 = UI.createElement("rectangle", {
+      x: 10,
+    });
+    const rect2 = UI.createElement("rectangle", {
+      x: 50,
+    });
     UI.group([rect1, rect2]);
 
-    const rect3 = UI.createElement("rectangle", { x: 10, y: 50 });
-    const rect4 = UI.createElement("rectangle", { x: 50, y: 50 });
+    const rect3 = UI.createElement("rectangle", {
+      x: 10,
+      y: 50,
+    });
+    const rect4 = UI.createElement("rectangle", {
+      x: 50,
+      y: 50,
+    });
     UI.group([rect3, rect4]);
 
     Keyboard.withModifierKeys({ ctrl: true }, () => {
@@ -1079,8 +1089,9 @@ describe("regression tests", () => {
     UI.group([rect1, rect3]);
     assertSelectedElements(rect1, rect2, rect3);
 
+    mouse.reset();
     Keyboard.withModifierKeys({ ctrl: true }, () => {
-      mouse.clickOn(rect1);
+      mouse.click(10, 5);
     });
     assertSelectedElements(rect1);
 
